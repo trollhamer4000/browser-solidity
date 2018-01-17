@@ -4,9 +4,10 @@ var EthJSBlock = require('ethereumjs-block')
 var ethJSUtil = require('ethereumjs-util')
 var BN = ethJSUtil.BN
 var executionContext = require('../../execution-context')
+var modal = require('../ui/modal-dialog-custom')
 
-function TxRunner (vmaccounts, opts) {
-  this.personalMode = opts.personalMode
+function TxRunner (vmaccounts, api) {
+  this._api = api
   this.blockNumber = 0
   this.runAsync = true
   if (executionContext.isVM()) {
@@ -59,7 +60,7 @@ TxRunner.prototype.execute = function (args, callback) {
         // NOTE: estimateGas very likely will return a large limit if execution of the code failed
         //       we want to be able to run the code in order to debug and find the cause for the failure
 
-        var warnEstimation = ' An important gas estimation might also be the sign of a problem in the contract code. Please check loops and be sure you did not sent value to a non payable function (that\'s also the reason of strong gas estimation).'
+        var warnEstimation = " An important gas estimation might also be the sign of a problem in the contract code. Please check loops and be sure you did not sent value to a non payable function (that's also the reason of strong gas estimation)."
         if (gasEstimation > gasLimit) {
           return callback('Gas required exceeds limit: ' + gasLimit + '. ' + warnEstimation)
         }
@@ -68,17 +69,15 @@ TxRunner.prototype.execute = function (args, callback) {
         }
 
         tx.gas = gasEstimation
-        var sendTransaction = self.personalMode ? executionContext.web3().personal.sendTransaction : executionContext.web3().eth.sendTransaction
-        try {
-          sendTransaction(tx, function (err, resp) {
-            if (err) {
-              return callback(err, resp)
-            }
 
-            tryTillResponse(resp, callback)
+        if (self._api.personalMode()) {
+          modal.promptPassphrase(null, 'Personal mode is enabled. Please provide passphrase of account ' + tx.from, '', (value) => {
+            sendTransaction(executionContext.web3().personal.sendTransaction, tx, value, callback)
+          }, () => {
+            return callback('Canceled by user.')
           })
-        } catch (e) {
-          return callback(`Send transaction failed: ${e.message} . if you use an injected provider, please check it is properly unlocked. `)
+        } else {
+          sendTransaction(executionContext.web3().eth.sendTransaction, tx, null, callback)
         }
       })
     }
@@ -146,6 +145,21 @@ function tryTillResponse (txhash, done) {
       })
     }
   })
+}
+
+function sendTransaction (sendTx, tx, pass, callback) {
+  var cb = function (err, resp) {
+    if (err) {
+      return callback(err, resp)
+    }
+    tryTillResponse(resp, callback)
+  }
+  var args = pass !== null ? [tx, pass, cb] : [tx, cb]
+  try {
+    sendTx.apply({}, args)
+  } catch (e) {
+    return callback(`Send transaction failed: ${e.message} . if you use an injected provider, please check it is properly unlocked. `)
+  }
 }
 
 function run (self, tx, stamp, callback) {

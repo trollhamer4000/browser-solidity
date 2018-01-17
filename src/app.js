@@ -247,6 +247,9 @@ function run () {
     api: {
       logMessage: (msg) => {
         self._components.editorpanel.log({ type: 'log', value: msg })
+      },
+      personalMode: () => {
+        return self._api.config.get('settings/personal-mode')
       }
     },
     opt: { removable: false, removable_instances: true }
